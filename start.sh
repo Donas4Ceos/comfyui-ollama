@@ -120,10 +120,10 @@ start_openwebui() {
         echo "Generated WEBUI_SECRET_KEY: $WEBUI_SECRET_KEY"
     fi
     
-    echo "Starting Open WebUI on port 3000..."
-    echo "Access at: http://localhost:3000"
+    echo "Starting Open WebUI on port $WEBUI_PORT..."
+    echo "Access at: http://localhost:$WEBUI_PORT"
     echo "Admin credentials: admin@openwebui.com / $WEBUI_SECRET_KEY"
-    nohup python3.12 -m open_webui &> /openwebui.log &
+    cd /workspace/open-webui && nohup python3.12 -m open_webui serve &> /openwebui.log &
     echo "Open WebUI started"
 }
 

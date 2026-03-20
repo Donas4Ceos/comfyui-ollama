@@ -153,6 +153,7 @@ RUN apt-get update && \
     wget \
     gnupg \
     xz-utils \
+    zstd \
     openssh-client \
     openssh-server \
     nano \
@@ -199,18 +200,24 @@ RUN curl -fSL "https://github.com/filebrowser/filebrowser/releases/download/${FI
     rm /tmp/fb.tar.gz
 
 # Install Ollama for serving LLMs
-ENV OLLAMA_VERSION=0.5.4
-RUN curl -fSL "https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-linux-amd64" -o /usr/local/bin/ollama && \
-    chmod +x /usr/local/bin/ollama
+ENV OLLAMA_VERSION=0.18.2
+RUN curl -fSL --retry 5 --retry-delay 3 "https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-linux-amd64.tar.zst" -o /tmp/ollama.tar.zst && \
+    mkdir -p /tmp/ollama_extract && \
+    tar -I zstd -xf /tmp/ollama.tar.zst -C /tmp/ollama_extract && \
+    find /tmp/ollama_extract -name "ollama" -type f -exec mv {} /usr/local/bin/ollama \; && \
+    chmod +x /usr/local/bin/ollama && \
+    rm -rf /tmp/ollama*
 
 # Install Node.js 22.x for Open WebUI
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install Open WebUI
+# Install Open WebUI (workaround: use --no-deps due to broken ddgs==9.11.2)
 ENV OPEN_WEBUI_VERSION=0.8.10
-RUN python3.12 -m pip install --no-cache-dir open-webui==${OPEN_WEBUI_VERSION} litellm
+RUN python3.12 -m pip install --no-cache-dir ddgs==9.11.3 && \
+    python3.12 -m pip install --no-cache-dir --no-deps open-webui==${OPEN_WEBUI_VERSION} && \
+    python3.12 -m pip install --no-cache-dir litellm
 
 # Set CUDA environment variables
 ENV PATH=/usr/local/cuda/bin:${PATH}
