@@ -102,6 +102,31 @@ start_jupyter() {
     echo "Jupyter Lab started"
 }
 
+# Start Ollama server for serving LLMs
+start_ollama() {
+    mkdir -p /workspace/ollama-models
+    echo "Starting Ollama on port 11434..."
+    echo "Models will be stored in: $OLLAMA_MODELS"
+    nohup ollama serve &> /ollama.log &
+    echo "Ollama started"
+}
+
+# Start Open WebUI for Ollama
+start_openwebui() {
+    mkdir -p /workspace/open-webui/data
+    
+    if [ -z "$WEBUI_SECRET_KEY" ]; then
+        export WEBUI_SECRET_KEY=$(openssl rand -base64 24)
+        echo "Generated WEBUI_SECRET_KEY: $WEBUI_SECRET_KEY"
+    fi
+    
+    echo "Starting Open WebUI on port 3000..."
+    echo "Access at: http://localhost:3000"
+    echo "Admin credentials: admin@openwebui.com / $WEBUI_SECRET_KEY"
+    nohup python3.12 -m open_webui &> /openwebui.log &
+    echo "Open WebUI started"
+}
+
 # ---------------------------------------------------------------------------- #
 #                               Main Program                                     #
 # ---------------------------------------------------------------------------- #
@@ -128,6 +153,8 @@ echo "Starting FileBrowser on port 8080..."
 nohup filebrowser &> /filebrowser.log &
 
 start_jupyter
+start_ollama
+start_openwebui
 
 # Create default comfyui_args.txt if it doesn't exist
 ARGS_FILE="/workspace/runpod-slim/comfyui_args.txt"

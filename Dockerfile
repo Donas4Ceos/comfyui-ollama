@@ -123,6 +123,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV IMAGEIO_FFMPEG_EXE=/usr/bin/ffmpeg
 ENV FILEBROWSER_CONFIG=/workspace/runpod-slim/.filebrowser.json
+ENV OLLAMA_MODELS=/workspace/ollama-models
+ENV OLLAMA_HOST=0.0.0.0:11434
+ENV OLLAMA_BASE_URL=http://localhost:11434
+ENV OLLAMA_KEEP_ALIVE=10m
+ENV WEBUI_PORT=3000
+ENV WEBUI_SECRET_KEY=changeme
+ENV DATA_DIR=/workspace/open-webui/data
+ENV ENABLE_OLLAMA_API=True
+ENV OLLAMA_API_BASE_URL=http://localhost:11434/api
 
 # ---- CUDA variant (re-declared for runtime stage) ----
 ARG CUDA_VERSION_DASH=12-8
@@ -189,6 +198,20 @@ RUN curl -fSL "https://github.com/filebrowser/filebrowser/releases/download/${FI
     tar xzf /tmp/fb.tar.gz -C /usr/local/bin filebrowser && \
     rm /tmp/fb.tar.gz
 
+# Install Ollama for serving LLMs
+ENV OLLAMA_VERSION=0.5.4
+RUN curl -fSL "https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-linux-amd64" -o /usr/local/bin/ollama && \
+    chmod +x /usr/local/bin/ollama
+
+# Install Node.js 22.x for Open WebUI
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install Open WebUI
+ENV OPEN_WEBUI_VERSION=0.8.10
+RUN python3.12 -m pip install --no-cache-dir open-webui==${OPEN_WEBUI_VERSION} litellm
+
 # Set CUDA environment variables
 ENV PATH=/usr/local/cuda/bin:${PATH}
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64
@@ -212,7 +235,7 @@ RUN mkdir -p /workspace/runpod-slim
 WORKDIR /workspace/runpod-slim
 
 # Expose ports
-EXPOSE 8188 22 8888 8080
+EXPOSE 8188 22 8888 8080 11434 3000
 
 # Copy start script
 COPY start.sh /start.sh
