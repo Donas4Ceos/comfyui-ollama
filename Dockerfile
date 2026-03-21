@@ -15,6 +15,9 @@ ARG TORCH_VERSION
 ARG TORCHVISION_VERSION
 ARG TORCHAUDIO_VERSION
 
+# ---- NVIDIA GPU Detection ----
+ARG HAS_NVIDIA_GPU=true
+
 # ---- CUDA variant (set in docker-bake.hcl per target) ----
 ARG CUDA_VERSION_DASH=12-8
 ARG TORCH_INDEX_SUFFIX=cu128
@@ -30,13 +33,18 @@ RUN apt-get update && \
     python3.12-venv \
     python3.12-dev \
     build-essential \
-    && wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb \
-    && dpkg -i cuda-keyring_1.1-1_all.deb \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends cuda-minimal-build-${CUDA_VERSION_DASH} libcusparse-dev-${CUDA_VERSION_DASH} \
+    && if [ "${HAS_NVIDIA_GPU}" = "true" ]; then \
+         echo "NVIDIA GPU detected - installing CUDA..." && \
+         wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb && \
+         dpkg -i cuda-keyring_1.1-1_all.deb && \
+         apt-get update && \
+         apt-get install -y --no-install-recommends cuda-minimal-build-${CUDA_VERSION_DASH} libcusparse-dev-${CUDA_VERSION_DASH} && \
+         rm cuda-keyring_1.1-1_all.deb; \
+       else \
+         echo "No NVIDIA GPU - skipping CUDA installation"; \
+       fi \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
-    && rm cuda-keyring_1.1-1_all.deb \
     && rm -f /usr/lib/python3.12/EXTERNALLY-MANAGED
 
 # Install pip and pip-tools for lock file generation
@@ -82,10 +90,18 @@ RUN cd /tmp/build/ComfyUI && \
     git init && git add -A && git -c user.name=- -c user.email=- commit -q -m "ComfyUI-RunpodDirect ${RUNPODDIRECT_SHA}" && \
     git remote add origin https://github.com/MadiatorLabs/ComfyUI-RunpodDirect.git
 
-# Install PyTorch (pinned version)
-RUN python3.12 -m pip install --no-cache-dir \
-    torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} torchaudio==${TORCHAUDIO_VERSION} \
-    --index-url https://download.pytorch.org/whl/${TORCH_INDEX_SUFFIX}
+# Install PyTorch (pinned version) - Conditionally based on GPU availability
+RUN if [ "${HAS_NVIDIA_GPU}" = "true" ]; then \
+      echo "Installing PyTorch with CUDA support..." && \
+      python3.12 -m pip install --no-cache-dir \
+        torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} torchaudio==${TORCHAUDIO_VERSION} \
+        --index-url https://download.pytorch.org/whl/${TORCH_INDEX_SUFFIX}; \
+    else \
+      echo "Installing PyTorch CPU version..." && \
+      python3.12 -m pip install --no-cache-dir \
+        torch torchvision torchaudio \
+        --index-url https://download.pytorch.org/whl/cpu; \
+    fi
 
 # Generate lock file from all requirements, then install with hash verification
 WORKDIR /tmp/build
@@ -133,6 +149,9 @@ ENV DATA_DIR=/workspace/open-webui/data
 ENV ENABLE_OLLAMA_API=True
 ENV OLLAMA_API_BASE_URL=http://localhost:11434/api
 
+# ---- NVIDIA GPU Detection (re-declared for runtime stage) ----
+ARG HAS_NVIDIA_GPU=true
+
 # ---- CUDA variant (re-declared for runtime stage) ----
 ARG CUDA_VERSION_DASH=12-8
 
@@ -167,13 +186,18 @@ RUN apt-get update && \
     procps \
     openssl \
     ffmpeg \
-    && wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb \
-    && dpkg -i cuda-keyring_1.1-1_all.deb \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends cuda-minimal-build-${CUDA_VERSION_DASH} \
+    && if [ "${HAS_NVIDIA_GPU}" = "true" ]; then \
+         echo "NVIDIA GPU detected - installing CUDA runtime..." && \
+         wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb && \
+         dpkg -i cuda-keyring_1.1-1_all.deb && \
+         apt-get update && \
+         apt-get install -y --no-install-recommends cuda-minimal-build-${CUDA_VERSION_DASH} && \
+         rm cuda-keyring_1.1-1_all.deb; \
+       else \
+         echo "No NVIDIA GPU - skipping CUDA runtime installation"; \
+       fi \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
-    && rm cuda-keyring_1.1-1_all.deb \
     && rm -f /usr/lib/python3.12/EXTERNALLY-MANAGED
 
 # Copy Python packages, executables, and Jupyter data from builder stage
@@ -219,11 +243,12 @@ RUN python3.12 -m pip install --no-cache-dir ddgs==9.11.3 && \
     python3.12 -m pip install --no-cache-dir --no-deps open-webui==${OPEN_WEBUI_VERSION} && \
     python3.12 -m pip install --no-cache-dir litellm
 
-# Set CUDA environment variables
-ENV PATH=/usr/local/cuda/bin:${PATH}
-ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64
+# Set CUDA environment variables (only if GPU is available)
+RUN if [ "${HAS_NVIDIA_GPU}" = "true" ]; then \
+      echo "export PATH=/usr/local/cuda/bin:\${PATH}" >> /etc/environment && \
+      echo "export LD_LIBRARY_PATH=/usr/local/cuda/lib64" >> /etc/environment; \
+    fi
 
-# Allow container to start on hosts with older CUDA 12.x drivers
 ENV NVIDIA_REQUIRE_CUDA=""
 ENV NVIDIA_DISABLE_REQUIRE=true
 ENV NVIDIA_VISIBLE_DEVICES=all

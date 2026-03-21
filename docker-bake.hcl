@@ -45,6 +45,11 @@ variable "FILEBROWSER_SHA256" {
   default = "8cd8c3baecb086028111b912f252a6e3169737fa764b5c510139e81f9da87799"
 }
 
+# NVIDIA GPU detection (set to false for CPU-only builds)
+variable "HAS_NVIDIA_GPU" {
+  default = "true"
+}
+
 group "default" {
   targets = ["common", "dev"]
 }
@@ -67,6 +72,7 @@ target "common" {
     FILEBROWSER_SHA256  = FILEBROWSER_SHA256
     CUDA_VERSION_DASH   = "12-8"
     TORCH_INDEX_SUFFIX  = "cu128"
+    HAS_NVIDIA_GPU      = HAS_NVIDIA_GPU
   }
 }
 
@@ -118,5 +124,28 @@ target "cuda13" {
     TORCHAUDIO_VERSION  = TORCHAUDIO_VERSION_5090
     CUDA_VERSION_DASH   = "13-0"
     TORCH_INDEX_SUFFIX  = "cu130"
+  }
+}
+
+# CPU-only image (no CUDA)
+target "cpu" {
+  context    = "."
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  tags = [
+    "tzicuri/comfyui-ollama:${TAG}-cpu",
+  ]
+  args = {
+    COMFYUI_VERSION     = COMFYUI_VERSION
+    MANAGER_SHA         = MANAGER_SHA
+    KJNODES_SHA         = KJNODES_SHA
+    CIVICOMFY_SHA       = CIVICOMFY_SHA
+    RUNPODDIRECT_SHA    = RUNPODDIRECT_SHA
+    TORCH_VERSION       = TORCH_VERSION
+    TORCHVISION_VERSION = TORCHVISION_VERSION
+    TORCHAUDIO_VERSION  = TORCHAUDIO_VERSION
+    FILEBROWSER_VERSION = FILEBROWSER_VERSION
+    FILEBROWSER_SHA256  = FILEBROWSER_SHA256
+    HAS_NVIDIA_GPU      = "false"
   }
 }
