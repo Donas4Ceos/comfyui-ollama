@@ -12,6 +12,8 @@ ARG KJNODES_SHA
 ARG CIVICOMFY_SHA
 ARG RUNPODDIRECT_SHA
 ARG COMFYUI_OLLAMA_SHA
+ARG IMPACT_PACK_SHA
+ARG VIDEOHELPERSUITE_SHA
 ARG TORCH_VERSION
 ARG TORCHVISION_VERSION
 ARG TORCHAUDIO_VERSION
@@ -34,6 +36,8 @@ RUN apt-get update && \
     python3.12-venv \
     python3.12-dev \
     build-essential \
+    rustc \
+    cargo \
     && if [ "${HAS_NVIDIA_GPU}" = "true" ]; then \
          echo "NVIDIA GPU detected - installing CUDA..." && \
          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb && \
@@ -60,7 +64,7 @@ ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64
 
 # Download pinned source archives
 WORKDIR /tmp/build
-RUN curl -fSL "https://github.com/comfyanonymous/ComfyUI/archive/refs/tags/${COMFYUI_VERSION}.tar.gz" -o comfyui.tar.gz && \
+RUN curl -fSL "https://github.com/Comfy-Org/ComfyUI/archive/refs/tags/${COMFYUI_VERSION}.tar.gz" -o comfyui.tar.gz && \
     mkdir -p ComfyUI && tar xzf comfyui.tar.gz --strip-components=1 -C ComfyUI && rm comfyui.tar.gz
 
 WORKDIR /tmp/build/ComfyUI/custom_nodes
@@ -73,13 +77,17 @@ RUN curl -fSL "https://github.com/ltdrdata/ComfyUI-Manager/archive/${MANAGER_SHA
     curl -fSL "https://github.com/MadiatorLabs/ComfyUI-RunpodDirect/archive/${RUNPODDIRECT_SHA}.tar.gz" -o runpoddirect.tar.gz && \
     mkdir -p ComfyUI-RunpodDirect && tar xzf runpoddirect.tar.gz --strip-components=1 -C ComfyUI-RunpodDirect && rm runpoddirect.tar.gz && \
     curl -fSL "https://github.com/stavsap/comfyui-ollama/archive/${COMFYUI_OLLAMA_SHA}.tar.gz" -o comfyui-ollama.tar.gz && \
-    mkdir -p ComfyUI-Ollama && tar xzf comfyui-ollama.tar.gz --strip-components=1 -C ComfyUI-Ollama && rm comfyui-ollama.tar.gz
+    mkdir -p ComfyUI-Ollama && tar xzf comfyui-ollama.tar.gz --strip-components=1 -C ComfyUI-Ollama && rm comfyui-ollama.tar.gz && \
+    curl -fSL "https://github.com/ltdrdata/ComfyUI-Impact-Pack/archive/${IMPACT_PACK_SHA}.tar.gz" -o impact.tar.gz && \
+    mkdir -p ComfyUI-Impact-Pack && tar xzf impact.tar.gz --strip-components=1 -C ComfyUI-Impact-Pack && rm impact.tar.gz && \
+    curl -fSL "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite/archive/${VIDEOHELPERSUITE_SHA}.tar.gz" -o vhs.tar.gz && \
+    mkdir -p ComfyUI-VideoHelperSuite && tar xzf vhs.tar.gz --strip-components=1 -C ComfyUI-VideoHelperSuite && rm vhs.tar.gz
 
 # Init git repos with upstream remotes so ComfyUI-Manager can detect versions
 # and users can update via Manager at their own risk
 RUN cd /tmp/build/ComfyUI && \
     git init && git add -A && git -c user.name=- -c user.email=- commit -q -m "ComfyUI ${COMFYUI_VERSION}" && git tag "${COMFYUI_VERSION}" && \
-    git remote add origin https://github.com/comfyanonymous/ComfyUI.git && \
+    git remote add origin https://github.com/Comfy-Org/ComfyUI.git && \
     cd /tmp/build/ComfyUI/custom_nodes/ComfyUI-Manager && \
     git init && git add -A && git -c user.name=- -c user.email=- commit -q -m "ComfyUI-Manager ${MANAGER_SHA}" && \
     git remote add origin https://github.com/ltdrdata/ComfyUI-Manager.git && \
@@ -94,7 +102,13 @@ RUN cd /tmp/build/ComfyUI && \
     git remote add origin https://github.com/MadiatorLabs/ComfyUI-RunpodDirect.git && \
     cd /tmp/build/ComfyUI/custom_nodes/ComfyUI-Ollama && \
     git init && git add -A && git -c user.name=- -c user.email=- commit -q -m "ComfyUI-Ollama ${COMFYUI_OLLAMA_SHA}" && \
-    git remote add origin https://github.com/stavsap/comfyui-ollama.git
+    git remote add origin https://github.com/stavsap/comfyui-ollama.git && \
+    cd /tmp/build/ComfyUI/custom_nodes/ComfyUI-Impact-Pack && \
+    git init && git add -A && git -c user.name=- -c user.email=- commit -q -m "ComfyUI-Impact-Pack ${IMPACT_PACK_SHA}" && \
+    git remote add origin https://github.com/ltdrdata/ComfyUI-Impact-Pack.git && \
+    cd /tmp/build/ComfyUI/custom_nodes/ComfyUI-VideoHelperSuite && \
+    git init && git add -A && git -c user.name=- -c user.email=- commit -q -m "ComfyUI-VideoHelperSuite ${VIDEOHELPERSUITE_SHA}" && \
+    git remote add origin https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git
 
 # Install PyTorch (pinned version) - Conditionally based on GPU availability
 RUN if [ "${HAS_NVIDIA_GPU}" = "true" ]; then \
@@ -109,10 +123,17 @@ RUN if [ "${HAS_NVIDIA_GPU}" = "true" ]; then \
         --index-url https://download.pytorch.org/whl/cpu; \
     fi
 
-# Generate lock file from all requirements, then install with hash verification
+# Generate lock file from base ComfyUI + original custom nodes, then install with hash verification
+# Impact Pack and VideoHelperSuite are installed separately (they pull sam-2/kornia which
+# conflict poorly with hash-verified installs in some build environments)
 WORKDIR /tmp/build
 RUN cat ComfyUI/requirements.txt > requirements.in && \
     for node_dir in ComfyUI/custom_nodes/*/; do \
+        node_name=$(basename "$node_dir"); \
+        # Skip nodes whose deps are installed separately below \
+        case "$node_name" in \
+            ComfyUI-Impact-Pack|ComfyUI-VideoHelperSuite) continue ;; \
+        esac; \
         if [ -f "$node_dir/requirements.txt" ]; then \
             # Fix ComfyUI-Ollama: 'dotenv' is not on PyPI, correct package is 'python-dotenv' \
             sed -i 's/^dotenv$/python-dotenv/' "$node_dir/requirements.txt"; \
@@ -133,12 +154,27 @@ RUN cat ComfyUI/requirements.txt > requirements.in && \
     PIP_CONSTRAINT=constraints.txt pip-compile --generate-hashes --output-file=requirements.lock --strip-extras --allow-unsafe requirements.in && \
     python3.12 -m pip install --no-cache-dir --ignore-installed --require-hashes -r requirements.lock
 
+# Install Impact Pack and VideoHelperSuite requirements without hash verification
+# (these nodes pull large ML packages like sam-2, kornia, spandrel that are unstable with pip-compile)
+RUN for node in ComfyUI-Impact-Pack ComfyUI-VideoHelperSuite; do \
+        if [ -f "ComfyUI/custom_nodes/$node/requirements.txt" ]; then \
+            sed -i 's/^dotenv$/python-dotenv/' "ComfyUI/custom_nodes/$node/requirements.txt"; \
+            python3.12 -m pip install --no-cache-dir -r "ComfyUI/custom_nodes/$node/requirements.txt" || true; \
+        fi; \
+    done
+
 # Pre-populate ComfyUI-Manager cache so first cold start skips the slow registry fetch
 COPY scripts/prebake-manager-cache.py /tmp/prebake-manager-cache.py
 RUN python3.12 /tmp/prebake-manager-cache.py /tmp/build/ComfyUI/user/__manager/cache
 
 # Bake ComfyUI + custom nodes into a known location for runtime copy
 RUN cp -r /tmp/build/ComfyUI /opt/comfyui-baked
+
+# ============================================================================
+# Stage 1.5: Dashy — Pull pre-built portal from official image
+# ============================================================================
+FROM lissy93/dashy:latest AS dashy
+# lissy93/dashy contains the built Node.js server at /app
 
 # ============================================================================
 # Stage 2: Runtime - Clean image with pre-installed packages
@@ -178,6 +214,8 @@ RUN apt-get update && \
     python3.12-venv \
     python3.12-dev \
     build-essential \
+    rustc \
+    cargo \
     libssl-dev \
     wget \
     gnupg \
@@ -214,6 +252,9 @@ RUN apt-get update && \
 COPY --from=builder /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /usr/local/share/jupyter /usr/local/share/jupyter
+
+# Copy Dashy pre-built Node.js portal from its official image
+COPY --from=dashy /app /opt/dashy
 
 # Register Jupyter extensions (pip --ignore-installed skips post-install hooks)
 RUN mkdir -p /usr/local/etc/jupyter/jupyter_server_config.d && \
@@ -276,6 +317,9 @@ RUN python3.12 -m pip install --no-cache-dir nvitop
 RUN python3.12 -m pip install --no-cache-dir gpustat && \
     ln -s /usr/local/bin/gpustat /usr/bin/gpustat
 RUN python3.12 -m pip install --no-cache-dir gpustat-web
+RUN python3.12 -m pip install --no-cache-dir 'litellm[proxy]'
+RUN python3.12 -m pip install --no-cache-dir huggingface_hub[cli] hf_transfer
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
 # Set CUDA environment variables (only if GPU is available)
 RUN if [ "${HAS_NVIDIA_GPU}" = "true" ]; then \
@@ -311,15 +355,15 @@ RUN mkdir -p /opt/ariang && \
     rm /tmp/ariang.zip
 
 # Expose ports
-# 8188: ComfyUI, 22: SSH, 8888: Jupyter, 8080: FileBrowser, 11434: Ollama, 3000: OpenWebUI, 8443: CodeServer, 8081: AriaNg, 6800: Aria2 RPC, 5572: Rclone GUI, 4000: GPU Stat Web
-EXPOSE 8188 22 8888 8080 11434 3000 8443 8081 6800 5572 4000
+# 80: Web Dashboard, 8188: ComfyUI, 22: SSH, 8888: Jupyter, 8080: FileBrowser, 11434: Ollama, 3000: OpenWebUI, 8443: CodeServer, 8081: AriaNg, 6800: Aria2 RPC, 5572: Rclone GUI, 4000: GPU Stat Web, 8000: LiteLLM
+EXPOSE 80 8188 22 8888 8080 11434 3000 8443 8081 6800 5572 4000 8000
 
 # Health check — ComfyUI HTTP endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
     CMD curl -f http://localhost:8188 || exit 1
 
-# Copy start script
-COPY start.sh /start.sh
+# Copy start script (using start_v3.sh to force cache bust)
+COPY start_v3.sh /start.sh
 
 # Set Python 3.12 as default
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \

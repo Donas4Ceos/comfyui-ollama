@@ -2,9 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [Unreleased / v0.19.x] - Mega Optimización de Microservicios
 
-### Breaking Changes
+### Añadido (Added)
+- **Unified AI Orchestrator Dashboard:** Un elegante Portal HTML en el puerto `80` que enruta a todos los servicios internos, con soporte dinámico para URLs proxy de RunPod.
+- **Suite de Descarga y Sincronización:** 
+  - Añadido Rclone y Rclone Web GUI (:5572) para sincronización con la nube (Google Drive, S3).
+  - Añadido Aria2 + AriaNg Web UI (:8081) para gestión de descargas aceleradas concurrentes.
+  - Añadido HuggingFace CLI y `hf_transfer` para descargas ultrarrápidas directas desde el Hub saturando anchos de banda de 10Gbps.
+- **Suite de Monitorización y Telemetría:**
+  - Añadido `nvitop` en terminal y `gpustat-web` (:4000) para métricas en vivo (VRAM/Compute) desde el navegador.
+- **Suite de Modelos de Lenguaje (LLMs):**
+  - Añadido LiteLLM Proxy (:8000) actuando como un AI Gateway centralizado compatible con OpenAI API y ruteando modelos de Ollama.
+- **Premium Custom Nodes:** 
+  - Añadido `ComfyUI-Impact-Pack` y `ComfyUI-VideoHelperSuite` precargados en la imagen Base.
+- **Soporte de Compilación Nativo:** Añadido compilador Rust (`rustc`, `cargo`) en Builder y Runtime para soportar la compilación automática de nodos pesados de IA y Tokenizers avanzados.
+
+### Cambiado (Changed)
+- Refactorizada toda la arquitectura del `Dockerfile` fragmentando la instalación de herramientas en capas granulares atómicas (separando pip installs de apt) para mejorar radicalmente la caché de construcción.
+- Actualizado `start_v3.sh` para orquestar los microservicios (`jupyter`, `ollama`, `open-webui`, `code-server`, `aria2c`, `rclone`, `litellm`, `dashboard`, etc.) arrancando en paralelo en segundo plano.
+- Fallback de Hardware Automático: ComfyUI ahora detecta dinámicamente si la GPU no está disponible en tiempo de ejecución de Docker e inicia automáticamente en modo CPU, permitiendo debugeo de microservicios en máquinas locales/Windows sin romper el contenedor.
+
+### Arreglado (Fixed)
+- Solucionado el error de instalación de dependencias en Open WebUI implementando una re-escritura en caliente del archivo Metadata del paquete `wheel` descargado, evitando la restricción problemática (yanked) de la librería `ddgs==9.11.2`.
+
+## [v0.18.x]### Breaking Changes
 
 - **Venv path renamed** from `.venv` to `.venv-cu128`. Existing users on the legacy (non-Blackwell) template will see a one-time re-setup on first boot after upgrading. Blackwell and newer users are unaffected.
 - **Ubuntu 22.04 → 24.04** for both images. Python 3.12 is now provided by the base OS (deadsnakes PPA no longer needed).

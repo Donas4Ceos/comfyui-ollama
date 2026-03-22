@@ -33,9 +33,14 @@ Los modelos se guardan en `/workspace/ollama-models` (volumen persistente en Run
 
 ### Descargar modelos de ComfyUI (checkpoints, LoRAs, etc.)
 
-Usa FileBrowser (`:8080`) o JupyterLab (`:8888`) para subir/bajar archivos a:
-- `/workspace/runpod-slim/ComfyUI/models/checkpoints`
-- `/workspace/runpod-slim/ComfyUI/models/loras`
+**Opción A: HuggingFace CLI (La más rápida - ¡NUEVO!)**
+La imagen incluye `hf_transfer` que saturará la red de RunPod descargando a gigabytes por segundo:
+```bash
+huggingface-cli download model_author/model_name model_file.safetensors --local-dir /workspace/models/checkpoints
+```
+
+**Opción B: AriaNg / FileBrowser**
+Usa el Dashboard de Orquestación en el puerto `80` para abrir AriaNg (gestor de descargas) o FileBrowser para subir/bajar archivos a `/workspace`.
 
 ---
 
@@ -87,7 +92,7 @@ docker buildx bake regular --push
 
 En RunPod al crear el Template:
 - **Container Image:** `tzicuri/comfyui-ollama:latest`
-- **Expose Ports:** `8188, 8080, 8888, 11434, 3000, 8443, 8081, 5572, 4000`
+- **Expose Ports:** `80, 8188, 8080, 8888, 11434, 3000, 8443, 8081, 6800, 5572, 4000, 8000`
 - **Volume Mount:** `/workspace` (mínimo 50 GB recomendado)
 
 ---
@@ -129,13 +134,16 @@ MODEL=deepseek-r1:70b
 
 | Puerto | Servicio | Credenciales |
 |--------|----------|-------------|
+| `80` | **Dashboard Portal Principal** | `admin` / `$PASSWORD` |
 | `8188` | ComfyUI | — |
-| `8080` | FileBrowser | `admin` / `adminadmin12` |
+| `8080` | FileBrowser | `admin` / `adminadmin12` (o `$PASSWORD`) |
 | `8888` | JupyterLab | Token via `JUPYTER_PASSWORD` |
-| `11434` | Ollama API | — |
-| `3000` | Open WebUI | `admin@openwebui.com` / `WEBUI_SECRET_KEY` |
-| `8443` | Code-Server | Password via logs (`CODE_SERVER_PASSWORD`) |
-| `8081` | AriaNg (Downloads) | — (Gestiona aria2 en :6800) |
+| `3000` | Open WebUI (Ollama GUI) | `admin@openwebui.com` / `WEBUI_SECRET_KEY` |
+| `11434` | Ollama API (Engine) | — |
+| `8443` | Code-Server | `admin` / `$PASSWORD` |
+| `8081` | AriaNg (Downloads) | Requiere puerto `6800` abierto |
+| `6800` | Aria2 RPC (Motor) | — (Solo comunicación interna/browser) |
 | `5572` | Rclone GUI | `admin` / `adminadmin12` |
-| `4000` | GPU Monitor (Web) | — (Visualización en tiempo real) |
-| `22` | SSH | Ver logs para password generado |
+| `4000` | GPU Monitor (Web) | — |
+| `8000` | LiteLLM Proxy | — |
+| `22` | SSH | Password via logs o Public Key |

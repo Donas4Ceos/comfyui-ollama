@@ -133,7 +133,8 @@ start_openwebui() {
 }
 
 # Start Code-Server
-start_codeserver() {
+    # Use the global PASSWORD if provided, else keep existing or generate random
+    CODE_SERVER_PASSWORD="${PASSWORD:-${CODE_SERVER_PASSWORD:-}}"
     if [ -z "$CODE_SERVER_PASSWORD" ]; then
         export CODE_SERVER_PASSWORD=$(openssl rand -base64 12)
     fi
@@ -149,8 +150,15 @@ start_codeserver() {
 # Start Aria2 with RPC and AriaNg Web UI
 start_aria2() {
     echo "Starting Aria2 RPC on port 6800..."
+    # Ensure a centralized models folder exists in workspace
+    # Defaulting to checkpoints for main downloads
+    mkdir -p /workspace/models/checkpoints
+    mkdir -p /workspace/models/loras
+    mkdir -p /workspace/models/vae
+    mkdir -p /workspace/models/controlnet
+    
     # --rpc-listen-all is needed for RunPod proxying
-    nohup aria2c --enable-rpc --rpc-listen-all --rpc-allow-origin-all --max-connection-per-server=16 --split=16 --min-split-size=1M --daemon &> /aria2.log &
+    nohup aria2c --enable-rpc --rpc-listen-all --rpc-allow-origin-all --max-connection-per-server=16 --split=16 --min-split-size=1M --dir=/workspace/models/checkpoints --daemon &> /aria2.log &
     
     echo "Starting AriaNg Web UI on port 8081..."
     cd /opt/ariang
@@ -183,6 +191,149 @@ start_gpu_monitor() {
     echo "GPU Web Monitor started"
 }
 
+# Start LiteLLM Proxy (Unified AI Gateway)
+start_litellm() {
+    echo "Starting LiteLLM Proxy on port 8000..."
+    
+    LITE_CONFIG="/workspace/runpod-slim/lite-config.yaml"
+    if [ ! -f "$LITE_CONFIG" ]; then
+        echo "Creating default LiteLLM config..."
+        cat <<EOF > "$LITE_CONFIG"
+model_list:
+  - model_name: ollama-models
+    litellm_params:
+      model: ollama_chat/all
+      api_base: http://localhost:11434
+EOF
+    fi
+    
+    # Start LiteLLM proxy
+    nohup litellm --config "$LITE_CONFIG" --port 8000 --host 0.0.0.0 --telemetry False &> /litellm.log &
+    echo "LiteLLM Proxy started"
+}
+
+# Start Dashy — Unified AI Orchestrator Portal
+start_dashboard() {
+    echo "Starting Dashy Portal on port 80..."
+    DASHY_DIR="/opt/dashy"
+    DASHY_CONF="$DASHY_DIR/user-data/conf.yml"
+    mkdir -p "$DASHY_DIR/user-data"
+
+    # Detect RunPod proxy base URL (e.g. https://<pod-id>-80.proxy.runpod.net)
+    # We'll bake the pod prefix into the config if RUNPOD_POD_ID is set
+    if [ -n "$RUNPOD_POD_ID" ]; then
+        BASE="https://${RUNPOD_POD_ID}"
+        _url() { echo "${BASE}-${1}.proxy.runpod.net"; }
+    else
+        _url() { echo "http://localhost:${1}"; }
+    fi
+
+    # Generate SHA-256 hash for Dashy auth (User: admin)
+    DASHY_PASS="${PASSWORD:-password123}"
+    DASHY_HASH=$(echo -n "$DASHY_PASS" | sha256sum | awk '{print $1}')
+
+    cat << EOF > "$DASHY_CONF"
+pageInfo:
+  title: AI Orchestrator Portal
+  description: Todos los servicios de tu instancia RunPod
+  navLinks:
+    - title: GitHub
+      path: https://github.com/tzicuri/comfyui-ollama
+
+appConfig:
+  theme: nord-frost
+  layout: auto
+  iconSize: medium
+  language: es
+  auth:
+    users:
+      - user: admin
+        hash: $DASHY_HASH
+        type: admin
+  statusCheck: true
+  statusCheckInterval: 60
+  startingView: default
+  defaultOpeningMethod: newtab
+
+sections:
+  - name: 🎨 Generación Visual
+    icon: fas fa-paint-brush
+    items:
+      - title: ComfyUI
+        description: Generación de imágenes y video por nodos
+        url: $(_url 8188)
+        icon: fas fa-palette
+        statusCheck: true
+        statusCheckUrl: $(_url 8188)
+
+  - name: 🤖 Modelos de Lenguaje (LLMs)
+    icon: fas fa-brain
+    items:
+      - title: Open WebUI
+        description: Interfaz de Chat Inteligente (Local)
+        url: $(_url 3000)
+        icon: fas fa-robot
+        statusCheck: true
+      - title: LiteLLM Proxy
+        description: API Gateway compatible con OpenAI
+        url: $(_url 8000)
+        icon: fas fa-route
+        statusCheck: true
+      - title: Ollama API
+        description: Motor interno de LLMs (sin interfaz)
+        url: $(_url 11434)
+        icon: fas fa-server
+        statusCheck: true
+
+  - name: 💻 Desarrollo y Código
+    icon: fas fa-code
+    items:
+      - title: Code-Server
+        description: VS Code en el navegador
+        url: $(_url 8443)
+        icon: fas fa-terminal
+        statusCheck: true
+      - title: JupyterLab
+        description: Notebooks interactivos y terminal
+        url: $(_url 8888)
+        icon: fas fa-file-code
+        statusCheck: true
+
+  - name: 📁 Gestión de Archivos y Descargas
+    icon: fas fa-folder-open
+    items:
+      - title: FileBrowser
+        description: Explorador de /workspace (admin/adminadmin12)
+        url: $(_url 8080)
+        icon: fas fa-folder-open
+        statusCheck: true
+      - title: AriaNg
+        description: Gestor de descargas aceleradas
+        url: $(_url 8081)
+        icon: fas fa-download
+        statusCheck: true
+      - title: Rclone GUI
+        description: Sincronización con la nube (admin/adminadmin12)
+        url: $(_url 5572)
+        icon: fas fa-cloud-upload-alt
+        statusCheck: true
+
+  - name: 📊 Monitorización
+    icon: fas fa-chart-line
+    items:
+      - title: GPU Monitor
+        description: Métricas en vivo de VRAM y GPU
+        url: $(_url 4000)
+        icon: fas fa-microchip
+        statusCheck: true
+EOF
+
+    # Start Dashy's built-in Node.js server
+    cd "$DASHY_DIR"
+    PORT=80 NODE_ENV=production nohup node server.js &> /dashy.log &
+    echo "Dashy Portal started on port 80"
+}
+
 # ---------------------------------------------------------------------------- #
 #                               Main Program                                     #
 # ---------------------------------------------------------------------------- #
@@ -190,6 +341,25 @@ start_gpu_monitor() {
 # Setup environment
 setup_ssh
 export_env_vars
+
+# First time setup: Copy baked ComfyUI to workspace if missing
+mkdir -p "$COMFYUI_DIR"
+if [ ! -f "$COMFYUI_DIR/main.py" ]; then
+    echo "First time setup: Copying baked ComfyUI to workspace..."
+    cp -r /opt/comfyui-baked/. "$COMFYUI_DIR/"
+    echo "ComfyUI copied to workspace"
+fi
+
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Setting up venv..."
+    cd "$COMFYUI_DIR"
+    python3.12 -m venv --system-site-packages "$VENV_DIR"
+    source "$VENV_DIR/bin/activate"
+    python -m ensurepip
+else
+    source "$VENV_DIR/bin/activate"
+    echo "Using existing ComfyUI installation"
+fi
 
 # Initialize FileBrowser if not already done
 if [ ! -f "$DB_FILE" ]; then
@@ -215,6 +385,27 @@ start_codeserver
 start_aria2
 start_rclone_gui
 start_gpu_monitor
+start_litellm
+start_dashboard
+
+# Create extra_model_paths.yaml to point to centralized /workspace/models
+EXTRA_PATHS="/workspace/runpod-slim/ComfyUI/extra_model_paths.yaml"
+if [ ! -f "$EXTRA_PATHS" ]; then
+    echo "Creating extra_model_paths.yaml..."
+    cat <<EOF > "$EXTRA_PATHS"
+runpod:
+    base_path: /workspace/models
+    checkpoints: checkpoints
+    clip: clip
+    clip_vision: clip_vision
+    configs: configs
+    controlnet: controlnet
+    embeddings: embeddings
+    loras: loras
+    upscale_models: upscale_models
+    vae: vae
+EOF
+fi
 
 # Create default comfyui_args.txt if it doesn't exist
 ARGS_FILE="/workspace/runpod-slim/comfyui_args.txt"
@@ -257,34 +448,6 @@ if [ -d "$OLD_VENV_DIR" ] && [ ! -d "$VENV_DIR" ]; then
     echo "Migration complete — $INSTALLED user nodes processed (${NODE_COUNT} total, baked nodes skipped)"
     echo "Old venv backed up at ${OLD_VENV_DIR}.bak — delete it to free space:"
     echo "  rm -rf ${OLD_VENV_DIR}.bak"
-fi
-
-# Setup ComfyUI if needed
-if [ ! -d "$COMFYUI_DIR" ] || [ ! -d "$VENV_DIR" ]; then
-    echo "First time setup: Copying baked ComfyUI to workspace..."
-
-    # Copy baked ComfyUI from image (no git, no network)
-    if [ ! -d "$COMFYUI_DIR" ]; then
-        cp -r /opt/comfyui-baked "$COMFYUI_DIR"
-        echo "ComfyUI copied to workspace"
-    fi
-
-    # Create venv with access to system packages (torch, numpy, etc. pre-installed in image)
-    if [ ! -d "$VENV_DIR" ]; then
-        cd "$COMFYUI_DIR"
-        python3.12 -m venv --system-site-packages "$VENV_DIR"
-        source "$VENV_DIR/bin/activate"
-
-        # Ensure pip is available in the venv (needed for ComfyUI-Manager)
-        python -m ensurepip
-
-        echo "Base packages (torch, numpy, etc.) available from system site-packages"
-        echo "ComfyUI ready — all dependencies pre-installed in image"
-    fi
-else
-    # Just activate the existing venv
-    source "$VENV_DIR/bin/activate"
-    echo "Using existing ComfyUI installation"
 fi
 
 # Warm up pip so ComfyUI-Manager's 5s timeout check doesn't fail on cold start
