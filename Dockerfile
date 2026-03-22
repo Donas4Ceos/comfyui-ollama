@@ -247,25 +247,35 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install essential utilities
-RUN apt-get update && apt-get install -y --no-install-recommends unzip zip rclone aria2 && \
+# Install essential tools (split for granular caching)
+RUN apt-get update && apt-get install -y --no-install-recommends unzip zip && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y --no-install-recommends rclone && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y --no-install-recommends aria2 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Open WebUI — patch the wheel to bypass yanked ddgs==9.11.2 pin
 ENV OPEN_WEBUI_VERSION=0.8.10
+WORKDIR /tmp/webui_patch
 RUN python3.12 -m pip download --no-deps open-webui==${OPEN_WEBUI_VERSION}
 
-RUN unzip open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl -d /tmp/webui_wheel && \
-    python3.12 -c "import os; f='/tmp/webui_wheel/open_webui-${OPEN_WEBUI_VERSION}.dist-info/METADATA'; t=open(f).read(); t=t.replace('ddgs==9.11.2', 'ddgs>=9.11.3').replace('ddgs ==9.11.2', 'ddgs>=9.11.3').replace('ddgs (==9.11.2)', 'ddgs (>=9.11.3)'); open(f,'w').write(t)" && \
-    cd /tmp/webui_wheel && zip -q -r ../open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl * && \
-    rm -rf /tmp/webui_wheel
+RUN unzip open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl -d content && \
+    python3.12 -c "import os; f='content/open_webui-${OPEN_WEBUI_VERSION}.dist-info/METADATA'; t=open(f).read(); t=t.replace('ddgs==9.11.2', 'ddgs>=9.11.3').replace('ddgs ==9.11.2', 'ddgs>=9.11.3').replace('ddgs (==9.11.2)', 'ddgs (>=9.11.3)'); open(f,'w').write(t)" && \
+    cd content && zip -q -r ../open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl * && \
+    cd .. && rm -rf content
 
 RUN python3.12 -m pip install --no-cache-dir ./open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl ddgs==9.11.3 starlette-compress && \
-    rm -f ./open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl
+    rm -rf /tmp/webui_patch
 
-# Install professional monitoring tools
-RUN python3.12 -m pip install --no-cache-dir nvitop gpustat gpustat-web && \
+# Install professional monitoring tools (granular layers)
+WORKDIR /workspace/runpod-slim
+RUN python3.12 -m pip install --no-cache-dir nvitop
+RUN python3.12 -m pip install --no-cache-dir gpustat && \
     ln -s /usr/local/bin/gpustat /usr/bin/gpustat
+RUN python3.12 -m pip install --no-cache-dir gpustat-web
 
 # Set CUDA environment variables (only if GPU is available)
 RUN if [ "${HAS_NVIDIA_GPU}" = "true" ]; then \
