@@ -247,17 +247,25 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Install essential utilities
+RUN apt-get update && apt-get install -y --no-install-recommends unzip zip rclone aria2 && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Install Open WebUI — patch the wheel to bypass yanked ddgs==9.11.2 pin
-# Since pip refuses to install yanked packages, we download the wheel, patch its METADATA, and install it.
 ENV OPEN_WEBUI_VERSION=0.8.10
-RUN apt-get update && apt-get install -y unzip zip rclone aria2 && \
-    python3.12 -m pip download --no-deps open-webui==${OPEN_WEBUI_VERSION} && \
-    unzip open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl -d /tmp/webui_wheel && \
+RUN python3.12 -m pip download --no-deps open-webui==${OPEN_WEBUI_VERSION}
+
+RUN unzip open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl -d /tmp/webui_wheel && \
     python3.12 -c "import os; f='/tmp/webui_wheel/open_webui-${OPEN_WEBUI_VERSION}.dist-info/METADATA'; t=open(f).read(); t=t.replace('ddgs==9.11.2', 'ddgs>=9.11.3').replace('ddgs ==9.11.2', 'ddgs>=9.11.3').replace('ddgs (==9.11.2)', 'ddgs (>=9.11.3)'); open(f,'w').write(t)" && \
-    cd /tmp/webui_wheel && zip -q -r ../open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl * && cd .. && \
-    python3.12 -m pip install --no-cache-dir ./open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl ddgs==9.11.3 starlette-compress nvitop gpustat gpustat-web && \
-    ln -s /usr/local/bin/gpustat /usr/bin/gpustat && \
-    rm -rf /tmp/webui_wheel ./open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl
+    cd /tmp/webui_wheel && zip -q -r ../open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl * && \
+    rm -rf /tmp/webui_wheel
+
+RUN python3.12 -m pip install --no-cache-dir ./open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl ddgs==9.11.3 starlette-compress && \
+    rm -f ./open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl
+
+# Install professional monitoring tools
+RUN python3.12 -m pip install --no-cache-dir nvitop gpustat gpustat-web && \
+    ln -s /usr/local/bin/gpustat /usr/bin/gpustat
 
 # Set CUDA environment variables (only if GPU is available)
 RUN if [ "${HAS_NVIDIA_GPU}" = "true" ]; then \
