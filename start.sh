@@ -120,11 +120,67 @@ start_openwebui() {
         echo "Generated WEBUI_SECRET_KEY: $WEBUI_SECRET_KEY"
     fi
     
-    echo "Starting Open WebUI on port $WEBUI_PORT..."
-    echo "Access at: http://localhost:$WEBUI_PORT"
-    echo "Admin credentials: admin@openwebui.com / $WEBUI_SECRET_KEY"
-    cd /workspace/open-webui && nohup python3.12 -m open_webui serve &> /openwebui.log &
+    export ACTUAL_WEBUI_PORT=${WEBUI_PORT:-3000}
+    echo "Starting Open WebUI on port $ACTUAL_WEBUI_PORT..."
+    echo "Access at: http://localhost:$ACTUAL_WEBUI_PORT"
+    cd /workspace/open-webui
+    if command -v open-webui >/dev/null 2>&1; then
+        nohup open-webui serve --host 0.0.0.0 --port $ACTUAL_WEBUI_PORT &> /openwebui.log &
+    else
+        nohup python3.12 -m open_webui serve --host 0.0.0.0 --port $ACTUAL_WEBUI_PORT &> /openwebui.log &
+    fi
     echo "Open WebUI started"
+}
+
+# Start Code-Server
+start_codeserver() {
+    if [ -z "$CODE_SERVER_PASSWORD" ]; then
+        export CODE_SERVER_PASSWORD=$(openssl rand -base64 12)
+    fi
+    echo "Starting Code-Server on port 8443..."
+    echo "Access at: http://localhost:8443"
+    echo "Password: $CODE_SERVER_PASSWORD"
+    mkdir -p /workspace/code-server
+    export PASSWORD=$CODE_SERVER_PASSWORD
+    nohup code-server --bind-addr 0.0.0.0:8443 --user-data-dir /workspace/code-server --config /workspace/code-server/config.yaml /workspace &> /codeserver.log &
+    echo "Code-Server started"
+}
+
+# Start Aria2 with RPC and AriaNg Web UI
+start_aria2() {
+    echo "Starting Aria2 RPC on port 6800..."
+    # --rpc-listen-all is needed for RunPod proxying
+    nohup aria2c --enable-rpc --rpc-listen-all --rpc-allow-origin-all --max-connection-per-server=16 --split=16 --min-split-size=1M --daemon &> /aria2.log &
+    
+    echo "Starting AriaNg Web UI on port 8081..."
+    cd /opt/ariang
+    nohup python3.12 -m http.server 8081 &> /ariang.log &
+    echo "AriaNg started"
+}
+
+# Start Rclone Web GUI
+start_rclone_gui() {
+    echo "Starting Rclone Web GUI on port 5572..."
+    # Default credentials same as FileBrowser for simplicity
+    nohup rclone rcd --rc-web-gui --rc-addr :5572 --rc-user admin --rc-pass adminadmin12 --rc-serve --rc-web-gui-no-open-browser &> /rclone-gui.log &
+    echo "Rclone Web GUI started"
+}
+
+# Start GPU Web Monitor (gpustat-web)
+start_gpu_monitor() {
+    echo "Starting GPU Web Monitor on port 4000..."
+    
+    # gpustat-web uses SSH to localhost, so we need to trust it
+    mkdir -p ~/.ssh
+    if [ ! -f ~/.ssh/id_rsa ]; then
+        ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
+        cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+        chmod 600 ~/.ssh/authorized_keys
+    fi
+    ssh-keyscan -H localhost >> ~/.ssh/known_hosts 2>/dev/null
+    
+    nohup gpustat-web --port 4000 &> /gpu-monitor.log &
+    echo "GPU Web Monitor started"
 }
 
 # ---------------------------------------------------------------------------- #
@@ -155,6 +211,10 @@ nohup filebrowser &> /filebrowser.log &
 start_jupyter
 start_ollama
 start_openwebui
+start_codeserver
+start_aria2
+start_rclone_gui
+start_gpu_monitor
 
 # Create default comfyui_args.txt if it doesn't exist
 ARGS_FILE="/workspace/runpod-slim/comfyui_args.txt"
@@ -233,8 +293,16 @@ python -m pip --version > /dev/null 2>&1
 # Start ComfyUI — keep container alive if it crashes so SSH/Jupyter remain accessible
 cd $COMFYUI_DIR
 FIXED_ARGS="--listen 0.0.0.0 --port 8188"
+
+# Auto-detect GPU: if no real CUDA device is available at runtime, fall back to CPU mode
+if ! python3.12 -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
+    echo "No CUDA device available — starting ComfyUI in CPU mode"
+    FIXED_ARGS="$FIXED_ARGS --cpu"
+fi
+
+# Read custom args (strip non-printable/binary chars from file for Windows compatibility)
 if [ -s "$ARGS_FILE" ]; then
-    CUSTOM_ARGS=$(grep -v '^#' "$ARGS_FILE" | tr '\n' ' ')
+    CUSTOM_ARGS=$(strings "$ARGS_FILE" | grep -v '^#' | tr '\n' ' ')
     if [ ! -z "$CUSTOM_ARGS" ]; then
         FIXED_ARGS="$FIXED_ARGS $CUSTOM_ARGS"
     fi

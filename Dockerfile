@@ -11,6 +11,7 @@ ARG MANAGER_SHA
 ARG KJNODES_SHA
 ARG CIVICOMFY_SHA
 ARG RUNPODDIRECT_SHA
+ARG COMFYUI_OLLAMA_SHA
 ARG TORCH_VERSION
 ARG TORCHVISION_VERSION
 ARG TORCHAUDIO_VERSION
@@ -70,7 +71,9 @@ RUN curl -fSL "https://github.com/ltdrdata/ComfyUI-Manager/archive/${MANAGER_SHA
     curl -fSL "https://github.com/MoonGoblinDev/Civicomfy/archive/${CIVICOMFY_SHA}.tar.gz" -o civicomfy.tar.gz && \
     mkdir -p Civicomfy && tar xzf civicomfy.tar.gz --strip-components=1 -C Civicomfy && rm civicomfy.tar.gz && \
     curl -fSL "https://github.com/MadiatorLabs/ComfyUI-RunpodDirect/archive/${RUNPODDIRECT_SHA}.tar.gz" -o runpoddirect.tar.gz && \
-    mkdir -p ComfyUI-RunpodDirect && tar xzf runpoddirect.tar.gz --strip-components=1 -C ComfyUI-RunpodDirect && rm runpoddirect.tar.gz
+    mkdir -p ComfyUI-RunpodDirect && tar xzf runpoddirect.tar.gz --strip-components=1 -C ComfyUI-RunpodDirect && rm runpoddirect.tar.gz && \
+    curl -fSL "https://github.com/stavsap/comfyui-ollama/archive/${COMFYUI_OLLAMA_SHA}.tar.gz" -o comfyui-ollama.tar.gz && \
+    mkdir -p ComfyUI-Ollama && tar xzf comfyui-ollama.tar.gz --strip-components=1 -C ComfyUI-Ollama && rm comfyui-ollama.tar.gz
 
 # Init git repos with upstream remotes so ComfyUI-Manager can detect versions
 # and users can update via Manager at their own risk
@@ -88,7 +91,10 @@ RUN cd /tmp/build/ComfyUI && \
     git remote add origin https://github.com/MoonGoblinDev/Civicomfy.git && \
     cd /tmp/build/ComfyUI/custom_nodes/ComfyUI-RunpodDirect && \
     git init && git add -A && git -c user.name=- -c user.email=- commit -q -m "ComfyUI-RunpodDirect ${RUNPODDIRECT_SHA}" && \
-    git remote add origin https://github.com/MadiatorLabs/ComfyUI-RunpodDirect.git
+    git remote add origin https://github.com/MadiatorLabs/ComfyUI-RunpodDirect.git && \
+    cd /tmp/build/ComfyUI/custom_nodes/ComfyUI-Ollama && \
+    git init && git add -A && git -c user.name=- -c user.email=- commit -q -m "ComfyUI-Ollama ${COMFYUI_OLLAMA_SHA}" && \
+    git remote add origin https://github.com/stavsap/comfyui-ollama.git
 
 # Install PyTorch (pinned version) - Conditionally based on GPU availability
 RUN if [ "${HAS_NVIDIA_GPU}" = "true" ]; then \
@@ -108,6 +114,10 @@ WORKDIR /tmp/build
 RUN cat ComfyUI/requirements.txt > requirements.in && \
     for node_dir in ComfyUI/custom_nodes/*/; do \
         if [ -f "$node_dir/requirements.txt" ]; then \
+            # Fix ComfyUI-Ollama: 'dotenv' is not on PyPI, correct package is 'python-dotenv' \
+            sed -i 's/^dotenv$/python-dotenv/' "$node_dir/requirements.txt"; \
+            # Ensure trailing newline so packages don't concatenate when appended \
+            echo "" >> "$node_dir/requirements.txt"; \
             cat "$node_dir/requirements.txt" >> requirements.in; \
         fi; \
     done && \
@@ -144,7 +154,7 @@ ENV OLLAMA_HOST=0.0.0.0:11434
 ENV OLLAMA_BASE_URL=http://localhost:11434
 ENV OLLAMA_KEEP_ALIVE=10m
 ENV WEBUI_PORT=3000
-ENV WEBUI_SECRET_KEY=changeme
+# WEBUI_SECRET_KEY is intentionally NOT set here — generated at runtime by start.sh for security
 ENV DATA_DIR=/workspace/open-webui/data
 ENV ENABLE_OLLAMA_API=True
 ENV OLLAMA_API_BASE_URL=http://localhost:11434/api
@@ -237,16 +247,23 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install Open WebUI (workaround: use --no-deps due to broken ddgs==9.11.2)
+# Install Open WebUI — patch the wheel to bypass yanked ddgs==9.11.2 pin
+# Since pip refuses to install yanked packages, we download the wheel, patch its METADATA, and install it.
 ENV OPEN_WEBUI_VERSION=0.8.10
-RUN python3.12 -m pip install --no-cache-dir ddgs==9.11.3 && \
-    python3.12 -m pip install --no-cache-dir --no-deps open-webui==${OPEN_WEBUI_VERSION} && \
-    python3.12 -m pip install --no-cache-dir litellm
+RUN apt-get update && apt-get install -y unzip zip rclone aria2 && \
+    python3.12 -m pip download --no-deps open-webui==${OPEN_WEBUI_VERSION} && \
+    unzip open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl -d /tmp/webui_wheel && \
+    python3.12 -c "import os; f='/tmp/webui_wheel/open_webui-${OPEN_WEBUI_VERSION}.dist-info/METADATA'; t=open(f).read(); t=t.replace('ddgs==9.11.2', 'ddgs>=9.11.3').replace('ddgs ==9.11.2', 'ddgs>=9.11.3').replace('ddgs (==9.11.2)', 'ddgs (>=9.11.3)'); open(f,'w').write(t)" && \
+    cd /tmp/webui_wheel && zip -q -r ../open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl * && cd .. && \
+    python3.12 -m pip install --no-cache-dir ./open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl ddgs==9.11.3 starlette-compress nvitop gpustat gpustat-web && \
+    ln -s /usr/local/bin/gpustat /usr/bin/gpustat && \
+    rm -rf /tmp/webui_wheel ./open_webui-${OPEN_WEBUI_VERSION}-py3-none-any.whl
 
 # Set CUDA environment variables (only if GPU is available)
 RUN if [ "${HAS_NVIDIA_GPU}" = "true" ]; then \
       echo "export PATH=/usr/local/cuda/bin:\${PATH}" >> /etc/environment && \
-      echo "export LD_LIBRARY_PATH=/usr/local/cuda/lib64" >> /etc/environment; \
+      echo "export LD_LIBRARY_PATH=/usr/local/cuda/lib64" >> /etc/environment && \
+      echo "alias gpu='nvitop'" >> /etc/bash.bashrc; \
     fi
 
 ENV NVIDIA_REQUIRE_CUDA=""
@@ -266,8 +283,22 @@ RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/
 RUN mkdir -p /workspace/runpod-slim
 WORKDIR /workspace/runpod-slim
 
+# Install code-server
+RUN curl -fsSL --retry 5 --retry-delay 5 https://code-server.dev/install.sh | sh
+
+# Install AriaNg (Aria2 Web UI)
+RUN mkdir -p /opt/ariang && \
+    curl -fSL "https://github.com/mayswind/AriaNg/releases/download/1.3.13/AriaNg-1.3.13-AllInOne.zip" -o /tmp/ariang.zip && \
+    unzip /tmp/ariang.zip -d /opt/ariang && \
+    rm /tmp/ariang.zip
+
 # Expose ports
-EXPOSE 8188 22 8888 8080 11434 3000
+# 8188: ComfyUI, 22: SSH, 8888: Jupyter, 8080: FileBrowser, 11434: Ollama, 3000: OpenWebUI, 8443: CodeServer, 8081: AriaNg, 6800: Aria2 RPC, 5572: Rclone GUI, 4000: GPU Stat Web
+EXPOSE 8188 22 8888 8080 11434 3000 8443 8081 6800 5572 4000
+
+# Health check — ComfyUI HTTP endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
+    CMD curl -f http://localhost:8188 || exit 1
 
 # Copy start script
 COPY start.sh /start.sh
