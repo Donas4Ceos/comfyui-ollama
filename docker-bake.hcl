@@ -99,6 +99,8 @@ target "regular" {
     "tzicuri/comfyui-ollama:cuda12.8",
     "tzicuri/comfyui-ollama:latest",
   ]
+  cache-from = ["type=registry,ref=tzicuri/comfyui-ollama:latest"]
+  cache-to = ["type=registry,mode=max,ref=tzicuri/comfyui-ollama:latest"]
 }
 
 # Dev image for local testing
@@ -106,6 +108,7 @@ target "dev" {
   inherits = ["common"]
   tags = ["tzicuri/comfyui-ollama:dev"]
   output = ["type=docker"]
+  cache-from = ["type=registry,ref=tzicuri/comfyui-ollama:dev"]
 }
 
 # Dev push targets (for CI pushing dev tags, without overriding latest)
