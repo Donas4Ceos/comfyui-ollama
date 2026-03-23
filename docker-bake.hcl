@@ -64,6 +64,9 @@ group "default" {
 }
 
 # Common settings for all targets (defaults to regular CUDA 12.8 / cu128)
+# Multi-stage Dockerfile: base-system, base-cuda, python-base, comfyui-core,
+# comfyui-deps, dashy, tools-binary, tools-nodejs, tools-monitoring, webui-open,
+# tools-extra, runtime (11 stages for optimal caching)
 target "common" {
   context    = "."
   dockerfile = "Dockerfile"
