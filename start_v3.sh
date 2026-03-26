@@ -70,6 +70,16 @@ nohup litellm --port 8000 --host 0.0.0.0 --telemetry False &> /litellm.log &
 
 
 
+# Detectar si estamos en RunPod y configurar URLs
+if [ -n "$RUNPOD_POD_ID" ]; then
+    RUNPOD_URL="https://${RUNPOD_POD_ID}"
+    BASE_URL="${RUNPOD_URL}"
+    STATUS_CHECK_URL="http://localhost"
+else
+    BASE_URL="http://localhost"
+    STATUS_CHECK_URL="http://localhost"
+fi
+
 # Configurar Dashy
 DASHY_DIR="/opt/dashy"
 mkdir -p "$DASHY_DIR/user-data"
@@ -93,71 +103,71 @@ sections:
     items:
       - title: ComfyUI
         description: Generación de imágenes y video
-        url: http://localhost:8188
+        url: ${BASE_URL}:8188
         icon: hl-comfyui
         statusCheck: true
-        statusCheckUrl: http://localhost:8188
+        statusCheckUrl: ${STATUS_CHECK_URL}:8188
   - name: Modelos
     items:
       - title: Open WebUI
         description: Chat con LLMs locales
-        url: http://localhost:3000
+        url: ${BASE_URL}:3000
         icon: hl-openai
         statusCheck: true
-        statusCheckUrl: http://localhost:3000
+        statusCheckUrl: ${STATUS_CHECK_URL}:3000
       - title: Ollama
         description: Motor de LLMs
-        url: http://localhost:11434
+        url: ${BASE_URL}:11434
         icon: hl-ollama
         statusCheck: true
-        statusCheckUrl: http://localhost:11434
+        statusCheckUrl: ${STATUS_CHECK_URL}:11434
       - title: LiteLLM
         description: API Gateway (OpenAI compatible)
-        url: http://localhost:8000
+        url: ${BASE_URL}:8000
         icon: hl-openai
         statusCheck: true
-        statusCheckUrl: http://localhost:8000
+        statusCheckUrl: ${STATUS_CHECK_URL}:8000
   - name: Desarrollo
     items:
       - title: Code-Server
         description: VS Code en el navegador
-        url: http://localhost:8443
+        url: ${BASE_URL}:8443
         icon: hl-visual-studio-code
         statusCheck: true
-        statusCheckUrl: http://localhost:8443
+        statusCheckUrl: ${STATUS_CHECK_URL}:8443
       - title: JupyterLab
         description: Notebooks interactivos
-        url: http://localhost:8888
+        url: ${BASE_URL}:8888
         icon: hl-jupyter
         statusCheck: true
-        statusCheckUrl: http://localhost:8888
+        statusCheckUrl: ${STATUS_CHECK_URL}:8888
   - name: Archivos
     items:
       - title: FileBrowser
         description: Explorador de archivos
-        url: http://localhost:8080
+        url: ${BASE_URL}:8080/filebrowser/
         icon: hl-filebrowser
         statusCheck: true
-        statusCheckUrl: http://localhost:8080
+        statusCheckUrl: ${STATUS_CHECK_URL}:8080
       - title: AriaNg
         description: Gestor de descargas
-        url: http://localhost:8081
+        url: ${BASE_URL}:8081
         icon: fas fa-download
         statusCheck: true
-        statusCheckUrl: http://localhost:8081
+        statusCheckUrl: ${STATUS_CHECK_URL}:8081
       - title: Rclone GUI
         description: "user: admin / pass: admin"
-        url: http://localhost:5572
+        url: ${BASE_URL}:5572
         icon: hl-rclone
         statusCheck: false
   - name: Monitor
     items:
       - title: GPU Monitor
         description: Métricas de GPU
-        url: http://localhost:4000
+        url: ${BASE_URL}:4000
         icon: hl-nvidia
         statusCheck: true
-        statusCheckUrl: http://localhost:4000
+        statusCheckUrl: ${STATUS_CHECK_URL}:4000
 EOF
 
 # Iniciar Dashy
